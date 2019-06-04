@@ -7,7 +7,7 @@ Required python packages:
   * cHaversine
   * basemap  (from matplotlib_toolkits)
   * plinkio  (when using genetic data)
-  * sci-kit learn (for skimage labeling)
+  * scipy (for scipy.ndimage.label)
 
 ### Usage
     python3 womble.py [-h] (-n NON_GENETIC | -p PLINK) -c COORDS
@@ -63,8 +63,8 @@ Required python packages:
                             change. This option suppresses these from being
                             output.
       --percentiles PERCENTILES
-                            [WIP] Only plot the grid-squares of the top N-th
-                            percentile (default: 5, meaning thatonly the top 1 in
-                            20 tiles, by absolute rate of change, will be shown).
+                            Only plot the grid-squares of the top N-th percentile
+                            (default: 5, meaning that only the top 1 in 20 tiles,
+                            by absolute rate of change, will be shown).
       --no-plot             Disable plotting and its output.
 

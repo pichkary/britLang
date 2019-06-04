@@ -1,4 +1,6 @@
-import argparse, sys, ast
+import argparse
+import ast
+import sys
 from time import asctime
 import numpy as np
 from cHaversine import haversine
@@ -45,15 +47,15 @@ parser.add_argument('-s', '--suppress-save', default=False, action='store_true',
                     help='By default, the script will save the grid\'s latitudes and longitudes, along with '
                          'the calculated rate-of-change, direction-of-change, and wighted direction-of-change. '
                          'This option suppresses these from being output.')
-parser.add_argument('--percentile', default=5., type=float,  # TODO percentiles
-                    help='[WIP] Only plot the grid-squares of the top N-th percentile (default: 5, meaning that'
+parser.add_argument('--percentile', default=5., type=float,
+                    help='Only plot the grid-squares of the top N-th percentile (default: 5, meaning that'
                          'only the top 1 in 20 tiles, by absolute rate of change, will be shown).')
 parser.add_argument('--no-plot', default=False, action='store_true',
                     help='Disable plotting and its output.')
 parser.add_argument('--no-plot-save', default=False, action='store_true',
                     help='If plotting, only display (do not save) the plot.')
 parser.add_argument('--alpha', default=0.0, type=float,
-                    help='Alpha value (opacity) for rate-of-change heatmap.')
+                    help='Alpha value (opacity) for rate-of-change heat-map (Default: 0.')
 
 args = parser.parse_args()
 
@@ -65,7 +67,7 @@ if args.plink:
 if not args.no_plot:
     import matplotlib.pyplot as plt
     from mpl_toolkits.basemap import Basemap
-    from skimage.morphology import label
+    from scipy.ndimage import label
 
 # importing data
 sampleLoc = np.loadtxt(args.coords, delimiter=args.coord_sep)
@@ -121,7 +123,7 @@ for i in range(len(longs)):
                                        tuple([longs[i], lats[j]])))
 
         distances = np.array(distances)
-        dist_matrix[i, j] = (distances ** -2) * average_multiplier
+        dist_matrix[i, j] = (distances ** -3) * average_multiplier
         dist_matrix[i, j] /= np.sum(dist_matrix[i, j])
 
 # Initialize matrices to store rate-of-change, along with weighted and unweighted direction-of-change
@@ -209,7 +211,9 @@ if not args.no_plot:
 
     # 2. Use rate-of-change matrix to find regions within the top first 2 N-th percentiles.
     #    These are connected and labeled.
-    grid_labeled = label(rateOfChange > cutoff_2, connectivity=2)
+    label_structure = [[1, 1, 1], [1, 1, 1], [1, 1, 1]]
+
+    grid_labeled, num_features = label(rateOfChange > cutoff_2, structure=label_structure)
     for label_ in np.unique(grid_labeled):
         # For any label which does not encompass a region in the first N-th percentile,
         if label_ not in np.unique(grid_labeled[rateOfChange > cutoff_1]):
