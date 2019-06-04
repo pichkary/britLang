@@ -7,7 +7,7 @@ Required python packages:
 * cHaversine
 * basemap  (from matplotlib_toolkits)
 * plinkio  (when using genetic data)
-
+* sci-kit learn (for skimage labeling)
 
 ### Usage
   python3 womble.py [-h] (-n NON_GENETIC | -p PLINK) -c COORDS

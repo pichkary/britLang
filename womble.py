@@ -45,11 +45,15 @@ parser.add_argument('-s', '--suppress-save', default=False, action='store_true',
                     help='By default, the script will save the grid\'s latitudes and longitudes, along with '
                          'the calculated rate-of-change, direction-of-change, and wighted direction-of-change. '
                          'This option suppresses these from being output.')
-parser.add_argument('--percentiles', default=5., type=float,  # TODO percentiles
-                    help='[WIP] Only plot the grid-squares of the top N-th percentile (default: 5, meaning that'\
+parser.add_argument('--percentile', default=5., type=float,  # TODO percentiles
+                    help='[WIP] Only plot the grid-squares of the top N-th percentile (default: 5, meaning that'
                          'only the top 1 in 20 tiles, by absolute rate of change, will be shown).')
 parser.add_argument('--no-plot', default=False, action='store_true',
                     help='Disable plotting and its output.')
+parser.add_argument('--no-plot-save', default=False, action='store_true',
+                    help='If plotting, only display (do not save) the plot.')
+parser.add_argument('--alpha', default=0.0, type=float,
+                    help='Alpha value (opacity) for rate-of-change heatmap.')
 
 args = parser.parse_args()
 
@@ -61,13 +65,12 @@ if args.plink:
 if not args.no_plot:
     import matplotlib.pyplot as plt
     from mpl_toolkits.basemap import Basemap
-
+    from skimage.morphology import label
 
 # importing data
 sampleLoc = np.loadtxt(args.coords, delimiter=args.coord_sep)
 if np.shape(sampleLoc)[1] != 2:
     raise IndexError("COORDS is not made up of 2 separate columns (check COORDS_SEP?)")
-
 
 if args.grid_bounds:
     grid_bounds = args.grid_bounds
@@ -89,10 +92,6 @@ if args.plink:
     sampleData = plinkfile.open(args.plink)
 else:
     sampleData = np.transpose(np.loadtxt(args.non_genetic, delimiter=args.non_gen_sep))
-
-
-# # TODO percentiles
-# PERCENTILE = 25  # 95 == only show top 5 percentile of tiles
 
 # Create grid for interpolation
 longs = np.arange(grid_bounds[0], grid_bounds[1] + 1, 1 / args.density[0])
@@ -148,13 +147,13 @@ for row in sampleData:
 
     # find the mean genotype per location
     mean_trait_value = []
-    
+
     for location in range(uniqueSampleLoc.shape[0]):
         mean_trait_value.append(np.mean(np.array(row)[uniqueSampleIndices == location]))
 
     interpolated = dist_matrix @ np.array(mean_trait_value)
 
-    # Calculate rates and directions of change per genotype at the midpoints of the grid-squares.
+    # Calculate rates and directions of change per variable at the midpoints of the grid-squares.
     dY = (interpolated[1:, 1:] - interpolated[:-1, 1:] +
           0.5 * (interpolated[:-1, 1:] - interpolated[1:, 1:] +
                  interpolated[1:, :-1] - interpolated[:-1, :-1])
@@ -170,15 +169,15 @@ for row in sampleData:
         midpoints_angles = np.arctan(np.divide(dY, dX)) + np.pi/2
         midpoints_angles[np.isnan(midpoints_angles)] = 0
         midpoints_angles *= 2
-        doubledAngle_dX += np.cos(midpoints_angles) * rateOfChange
         doubledAngle_dY += np.sin(midpoints_angles) * rateOfChange
+        doubledAngle_dX += np.cos(midpoints_angles) * rateOfChange
 
     doubledDirectionOfChange += midpoints_angles
 
 finalDirectionOfChange = doubledDirectionOfChange / 2
 with np.errstate(all='ignore'):
     finalWeightedDirectionOfChange = np.arctan(np.divide(doubledAngle_dY, doubledAngle_dX))/2
-
+    finalWeightedDirectionOfChange[doubledAngle_dX < 0] += np.pi/2
 # End of wombling
 
 # Reporting results
@@ -196,31 +195,55 @@ if not args.suppress_save:
 
 # Plotting rates of change
 if not args.no_plot:
+    # Using a percentile, select regions with the top N-th percentile rates-of-change. These are the core regions.
+    #    The 2nd N-th percentile is to be used as a "linked"; they are only to be plotted if they are connected to
+    #    regions in the top N-th percentile. Plot quivers for only the core regions and connected regions in the
+    #    2nd N-th percentile.
+    # 1. Find 1st and 2nd N-th percentile cutoffs
+    gridSize = len(rateOfChange.ravel().tolist())
+    cutoff_1, cutoff_2 = np.array([value[0] for value in
+                                   sorted(zip((rateOfChange.ravel().tolist()),
+                                              range(gridSize)),
+                                          reverse=True)])[[int(args.percentile * gridSize/100),
+                                                           int(args.percentile * 2 * gridSize/100)]]
+
+    # 2. Use rate-of-change matrix to find regions within the top first 2 N-th percentiles.
+    #    These are connected and labeled.
+    grid_labeled = label(rateOfChange > cutoff_2, connectivity=2)
+    for label_ in np.unique(grid_labeled):
+        # For any label which does not encompass a region in the first N-th percentile,
+        if label_ not in np.unique(grid_labeled[rateOfChange > cutoff_1]):
+            grid_labeled[grid_labeled == label_] = 0
+
     m = Basemap(projection='cyl',
-                llcrnrlat=grid_bounds[2],
-                urcrnrlat=grid_bounds[3],
-                llcrnrlon=grid_bounds[0],
-                urcrnrlon=grid_bounds[1],
+                llcrnrlat=np.min(grid_lats),
+                urcrnrlat=np.max(grid_lats),
+                llcrnrlon=np.min(grid_longs),
+                urcrnrlon=np.max(grid_longs),
                 resolution='i')
     m.drawcoastlines(linewidth=0.5)
 
     plt.tight_layout(pad=0, h_pad=0, w_pad=0)
 
+    # Heat-map of rates-of-change, with midpoints of grid-squares being the points for which
+    # rate-of-change was calculated.
     plt.imshow(np.fliplr(rateOfChange).T,
                extent=[longs.min(), longs.max(),
                        lats.min(), lats.max()],
-               cmap="Reds", alpha=0.9)
+               cmap="Reds", alpha=args.alpha)
 
-    plt.scatter(sampleLoc[:, 0], sampleLoc[:, 1], c='green', alpha=0.3)
-
-    plt.quiver(mid_longs, mid_lats,  # Longitude, Latitude
-               np.cos(finalWeightedDirectionOfChange),
-               np.sin(finalWeightedDirectionOfChange),
+    plt.quiver(mid_longs[grid_labeled > 0], mid_lats[grid_labeled > 0],  # Longitude, Latitude
+               np.cos(finalWeightedDirectionOfChange[grid_labeled > 0]),
+               np.sin(finalWeightedDirectionOfChange[grid_labeled > 0]),
                headwidth=0, headlength=0, color="Black",
-               headaxislength=0, width=0.0005, pivot='mid')
+               headaxislength=0, width=0.005, pivot='mid')
 
-    plt.savefig(fname="{}_{}_{}.png".format(args.output, *args.density), dpi=300, format="png")
+    if args.no_plot_save:
+        plt.show()
+    else:
+        plt.savefig(fname="{}_{}_{}.png".format(args.output, *args.density), dpi=300, format="png")
 
     plt.clf()
 
-print(asctime(), file=sys.stderr)
+print(asctime(), "\nDone\n", file=sys.stderr)
+
