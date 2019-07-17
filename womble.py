@@ -15,15 +15,16 @@ data_input = required_arguments.add_mutually_exclusive_group(required=True)
 data_input.add_argument('-n', '--non-genetic',
                         help='TSV (tab-separated values) or similar file containing non-genenetic data, '
                              'one sample per row. Either non-genetic data or PLINK-formatted genetic '
-                             'data is required (see -p/--plink). May have non-data lines beginning with a #')
+                             'data is required (see -p/--plink). Lines beginning with a number sign '
+                             '(#) are ignored.')
 data_input.add_argument('-p', '--plink',
                         help='Genetic data in PLINK format (.bam, .fam, .bim) without the extension (if files'
                              ' are DATA.bam, DATA.fam, and DATA.bim, use "--plink DATA" ). Either non-genetic '
                              'data or PLINK-formatted genetic data is required (see -n/--non-genetic)')
 required_arguments.add_argument('-c', '--coords', required=True,
                                 help='TSV (tab-separated values) or similar file with the locations of each '
-                                     'sample. One sample per row and longitude and latitude for each '
-                                     'sample. May have non-data lines beginning with a #')
+                                     'sample. One row contains one sample\'s longitude and latitude. '
+                                     'Lines beginning with a number sign (#) are ignored.')
 
 # parsing optional arguments
 parser.add_argument('-o', '--output', type=str, default="womble_out",
@@ -32,13 +33,13 @@ parser.add_argument('--coord-sep', type=str,
                     help='Separator for the positions-file (default: whitespace)')
 parser.add_argument('--non-gen-sep', type=str,
                     help='Separator for the non-genetic data (default: whitespace)')
-parser.add_argument('--density', default=(1, 1), type=ast.literal_eval,
+parser.add_argument('-d', '--density', default=(1, 1), type=ast.literal_eval,
                     help='Density (per unit longitude and latitude) at which to compute wombling '
                          '(default: (1, 1) )')
 parser.add_argument('--grid-bounds', type=ast.literal_eval,
                     help='Boundary of the grid in which wombling is computed, in longitude and latitude '
-                         '(minLong, maxLong, minLat, maxLat, e.g. (120, 125, -6, 3). If this is not set, '
-                         'the default boundaries are 1.5x DENSITY away from the most extreme coordinates.')
+                         '(minLong, maxLong, minLat, maxLat, e.g. "(120, 125, -6, 3)"). If this is not set, '
+                         'the default boundaries are set using the most extreme coordinates in COORDS.')
 parser.add_argument('-i', '--identical', default=False, action='store_true',
                     help='If selected, the traits from samples at a single location are not averaged before '
                          'interpolation. Interpolation then treats a single location with two samples as '
@@ -72,10 +73,34 @@ if not args.no_plot:
 # importing data
 sampleLoc = np.loadtxt(args.coords, delimiter=args.coord_sep)
 if np.shape(sampleLoc)[1] != 2:
-    raise IndexError("COORDS is not made up of 2 separate columns (check COORDS_SEP?)")
+    raise IndexError('{} is not made up of 2 separate columns (check COORDS_SEP?)'.format(args.coords))
+
+if args.plink:
+    sampleData = plinkfile.open(args.plink)
+    print('Using data file (PLINK):  {}'.format(args.plink), file=sys.stderr)
+    printEveryNthLine = 10000
+else:
+    sampleData = np.transpose(np.loadtxt(args.non_genetic, delimiter=args.non_gen_sep))
+    if np.shape(sampleData)[1] != np.shape(sampleLoc)[0]:
+        raise IndexError('Make sure that {} has one row per position in {}!'.format(args.non_genetic, args.coords))
+    print('Using data file:  {}'.format(args.non_genetic), file=sys.stderr)
+    printEveryNthLine = int(np.shape(sampleData)[0]/10)
+
+if args.density:
+    if not (type(args.density) is tuple and len(args.density) == 2):
+        raise IndexError('DENSITY must be a tuple of size 2 (default: "(1, 1)", input: {} )'.format(args.density))
+    else:
+        print('Using density:  {}'.format(args.density), file=sys.stderr)
 
 if args.grid_bounds:
+    # If grid_bounds are set, make sure that they are properly formatted
     grid_bounds = args.grid_bounds
+    if not (grid_bounds is tuple and len(grid_bounds) == 4):
+        raise IndexError('GRID_BOUNDS must be a tuple with 4 elements (e.g. "(120, 125, -6, 3)"), '
+                         'but input was: {}'.format(args.grid_bounds))
+    if args.grid_bounds[0] >= args.grid_bounds[1] or args.grid_bounds[2] >= args.grid_bounds[3]:
+        print('WARNING: Are you sure that GRID_BOUNDS is formatted correctly? \n'
+              '         (minLong, maxLong, minLat, maxLat, e.g. "(120, 125, -6, 3)")', file=sys.stderr)
 else:
     # If grid_bounds were not set from the console, use the data to create them.
     grid_bounds = (np.min(sampleLoc[:, 0]) - 1.5 * args.density[0] ** -1,  # Longitude
@@ -90,14 +115,9 @@ print("Wombling grid bounds: \n"
       "  Max latitude:   {: 3.4f} \n".format(*grid_bounds),
       file=sys.stderr)
 
-if args.plink:
-    sampleData = plinkfile.open(args.plink)
-else:
-    sampleData = np.transpose(np.loadtxt(args.non_genetic, delimiter=args.non_gen_sep))
-
 # Create grid for interpolation
-longs = np.arange(grid_bounds[0], grid_bounds[1] + 1, 1 / args.density[0])
-lats = np.arange(grid_bounds[2], grid_bounds[3] + 1, 1 / args.density[1])
+longs = np.arange(grid_bounds[0], grid_bounds[1], 1 / args.density[0])
+lats = np.arange(grid_bounds[2], grid_bounds[3], 1 / args.density[1])
 grid_lats, grid_longs = np.meshgrid(lats, longs)
 mid_lats, mid_longs = np.meshgrid((lats[1:] + lats[:-1])/2, (longs[1:] + longs[:-1])/2)
 
@@ -141,7 +161,7 @@ doubledAngle_dY = np.copy(rateOfChange)
 rowNum = 0
 for row in sampleData:
     rowNum += 1
-    if rowNum % 10000 == 1:
+    if rowNum % printEveryNthLine == 1:
         print("Row: {}".format(rowNum), file=sys.stderr)
 
     if len(np.unique(row)) == 1:
@@ -175,15 +195,20 @@ for row in sampleData:
         doubledAngle_dX += np.cos(midpoints_angles) * rateOfChange
 
     doubledDirectionOfChange += midpoints_angles
+print("All rows processed", file=sys.stderr)
 
 finalDirectionOfChange = doubledDirectionOfChange / 2
 with np.errstate(all='ignore'):
     finalWeightedDirectionOfChange = np.arctan(np.divide(doubledAngle_dY, doubledAngle_dX))/2
     finalWeightedDirectionOfChange[doubledAngle_dX < 0] += np.pi/2
+
+print("Wombling completed.", file=sys.stderr)
 # End of wombling
 
 # Reporting results
 if not args.suppress_save:
+    print('Saving results (rate of change, direction of change) and info needed for plotting \n'
+          '  (longitudes and latitudes of the grid).', file=sys.stderr)
     np.savetxt("{}_longitudes_{}_{}.txt".format(args.output, *args.density),
                (longs[1:] + longs[:-1])/2, fmt="%.10f")
     np.savetxt("{}_latitudes_{}_{}.txt".format(args.output, *args.density),
@@ -197,6 +222,7 @@ if not args.suppress_save:
 
 # Plotting rates of change
 if not args.no_plot:
+    print("Drawing plots...", file=sys.stderr)
     # Using a percentile, select regions with the top N-th percentile rates-of-change. These are the core regions.
     #    The 2nd N-th percentile is to be used as a "linked"; they are only to be plotted if they are connected to
     #    regions in the top N-th percentile. Plot quivers for only the core regions and connected regions in the
@@ -211,9 +237,10 @@ if not args.no_plot:
 
     # 2. Use rate-of-change matrix to find regions within the top first 2 N-th percentiles.
     #    These are connected and labeled.
-    label_structure = [[1, 1, 1], [1, 1, 1], [1, 1, 1]]
-
-    grid_labeled, num_features = label(rateOfChange > cutoff_2, structure=label_structure)
+    grid_labeled, num_features = label(rateOfChange > cutoff_2,
+                                       structure=[[1, 1, 1],
+                                                  [1, 1, 1],
+                                                  [1, 1, 1]])
     for label_ in np.unique(grid_labeled):
         # For any label which does not encompass a region in the first N-th percentile,
         if label_ not in np.unique(grid_labeled[rateOfChange > cutoff_1]):
@@ -250,4 +277,3 @@ if not args.no_plot:
     plt.clf()
 
 print(asctime(), "\nDone\n", file=sys.stderr)
-

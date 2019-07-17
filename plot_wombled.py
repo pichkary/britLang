@@ -45,9 +45,10 @@ cutoff_1, cutoff_2 = np.array([value[0] for value in
                                                        int(args.percentile*2)]]
 
 # 2. Use rate-of-change matrix to find regions within the top first 2 N-th percentiles.
-label_structure = [[1, 1, 1], [1, 1, 1], [1, 1, 1]]
-
-grid_labeled, num_features = label(rateOfChange > cutoff_2, structure=label_structure)
+grid_labeled, num_features = label(rateOfChange > cutoff_2,
+                                   structure=[[1, 1, 1],
+                                              [1, 1, 1],
+                                              [1, 1, 1]])
 for label_ in np.unique(grid_labeled):
     if label_ not in np.unique(grid_labeled[rateOfChange > cutoff_1]):
         grid_labeled[grid_labeled == label_] = 0
