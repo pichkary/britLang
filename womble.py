@@ -49,8 +49,8 @@ parser.add_argument('-s', '--suppress-save', default=False, action='store_true',
                          'the calculated rate-of-change, direction-of-change, and wighted direction-of-change. '
                          'This option suppresses these from being output.')
 parser.add_argument('--percentile', default=5., type=float,
-                    help='Only plot the grid-squares of the top N-th percentile (default: 5, meaning that'
-                         'only the top 1 in 20 tiles, by absolute rate of change, will be shown).')
+                    help='Only plot the grid-squares of the top N-th percentile (default: 5. The top 5th '
+                         '%-ile will select only the top 1 in 20 tiles by absolute rate of change).')
 parser.add_argument('--no-plot', default=False, action='store_true',
                     help='Disable plotting and its output.')
 parser.add_argument('--no-plot-save', default=False, action='store_true',
@@ -229,11 +229,17 @@ if not args.no_plot:
     #    2nd N-th percentile.
     # 1. Find 1st and 2nd N-th percentile cutoffs
     gridSize = len(rateOfChange.ravel().tolist())
+    if args.percentile > 50:
+        perc = 50
+    elif int(args.percentile * gridSize / 100) < 1:
+        perc = 100 / gridSize
+    else:
+        perc = args.percentile
     cutoff_1, cutoff_2 = np.array([value[0] for value in
                                    sorted(zip((rateOfChange.ravel().tolist()),
                                               range(gridSize)),
-                                          reverse=True)])[[int(args.percentile * gridSize/100),
-                                                           int(args.percentile * 2 * gridSize/100)]]
+                                          reverse=True)])[[int(perc * gridSize/100),
+                                                           int(perc * 2 * gridSize/100)]]
 
     # 2. Use rate-of-change matrix to find regions within the top first 2 N-th percentiles.
     #    These are connected and labeled.

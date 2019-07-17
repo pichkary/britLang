@@ -38,11 +38,18 @@ mid_lats, mid_longs = np.meshgrid(lats, longs)
 #    regions in the top N-th percentile. Plot quivers for only the core regions and connected regions in the
 #    2nd N-th percentile.
 # 1. Find 1st and 2nd N-th percentile cutoffs
+gridSize = len(rateOfChange.ravel().tolist())
+if args.percentile > 50:
+    perc = 50
+elif int(args.percentile * gridSize / 100) < 1:
+    perc = 100 / gridSize
+else:
+    perc = args.percentile
 cutoff_1, cutoff_2 = np.array([value[0] for value in
                                sorted(zip((rateOfChange.ravel().tolist()),
                                           range(len(rateOfChange.ravel().tolist()))),
-                                      reverse=True)])[[int(args.percentile),
-                                                       int(args.percentile*2)]]
+                                      reverse=True)])[[int(perc * gridSize/100),
+                                                       int(perc * 2 * gridSize/100)]]
 
 # 2. Use rate-of-change matrix to find regions within the top first 2 N-th percentiles.
 grid_labeled, num_features = label(rateOfChange > cutoff_2,
