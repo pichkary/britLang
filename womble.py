@@ -50,13 +50,13 @@ parser.add_argument('-s', '--suppress-save', default=False, action='store_true',
                          'This option suppresses these from being output.')
 parser.add_argument('--percentile', default=5., type=float,
                     help='Only plot the grid-squares of the top N-th percentile (default: 5. The top 5th '
-                         '%-ile will select only the top 1 in 20 tiles by absolute rate of change).')
+                         'percentile will select only the top 1 in 20 tiles by absolute rate of change).')
 parser.add_argument('--no-plot', default=False, action='store_true',
                     help='Disable plotting and its output.')
 parser.add_argument('--no-plot-save', default=False, action='store_true',
                     help='If plotting, only display (do not save) the plot.')
-parser.add_argument('--alpha', default=0.0, type=float,
-                    help='Alpha value (opacity) for rate-of-change heat-map (Default: 0.')
+parser.add_argument('--alpha', default=0.5, type=float,
+                    help='Alpha value (opacity) for rate-of-change heat-map (Default: 0.5)')
 
 args = parser.parse_args()
 
@@ -73,7 +73,8 @@ if not args.no_plot:
 # importing data
 sampleLoc = np.loadtxt(args.coords, delimiter=args.coord_sep)
 if np.shape(sampleLoc)[1] != 2:
-    raise IndexError('{} is not made up of 2 separate columns (check COORDS_SEP?)'.format(args.coords))
+    raise IndexError('{} has {} separate columns, but ought to be 2 '
+                     '(check COORDS_SEP?)'.format(args.coords, np.shape(sampleLoc)[1]))
 
 if args.plink:
     sampleData = plinkfile.open(args.plink)
@@ -82,12 +83,16 @@ if args.plink:
 else:
     sampleData = np.transpose(np.loadtxt(args.non_genetic, delimiter=args.non_gen_sep))
     if np.shape(sampleData)[1] != np.shape(sampleLoc)[0]:
-        raise IndexError('Make sure that {} has one row per position in {}!'.format(args.non_genetic, args.coords))
+        raise IndexError('Make sure that {} ({} rows) has one row per position '
+                         'in {} ({} positions)!'.format(args.non_genetic, np.shape(sampleData)[1],
+                                                        args.coords, np.shape(sampleLoc)[0]))
     print('Using data file:  {}'.format(args.non_genetic), file=sys.stderr)
     printEveryNthLine = int(np.shape(sampleData)[0]/10)
 
 if args.density:
-    if not (type(args.density) is tuple and len(args.density) == 2):
+    if not (type(args.density) is tuple):
+        raise TypeError('DENSITY must be a tuple of size 2 (default: "(1, 1)", input: {} )'.format(args.density))
+    elif len(args.density) != 2:
         raise IndexError('DENSITY must be a tuple of size 2 (default: "(1, 1)", input: {} )'.format(args.density))
     else:
         print('Using density:  {}'.format(args.density), file=sys.stderr)
@@ -95,9 +100,14 @@ if args.density:
 if args.grid_bounds:
     # If grid_bounds are set, make sure that they are properly formatted
     grid_bounds = args.grid_bounds
-    if not (grid_bounds is tuple and len(grid_bounds) == 4):
+    if not (type(grid_bounds) is tuple):
+        raise TypeError('GRID_BOUNDS must be a tuple with 4 elements (e.g. "(120, 125, -6, 3)"), '
+                        'but input was: {}, of type {}'.format(args.grid_bounds,
+                                                               type(args.grid_bounds)))
+    elif len(grid_bounds) != 4:
         raise IndexError('GRID_BOUNDS must be a tuple with 4 elements (e.g. "(120, 125, -6, 3)"), '
-                         'but input was: {}'.format(args.grid_bounds))
+                         'but input was: {}, of length {}'.format(args.grid_bounds,
+                                                                  len(args.grid_bounds)))
     if args.grid_bounds[0] >= args.grid_bounds[1] or args.grid_bounds[2] >= args.grid_bounds[3]:
         print('WARNING: Are you sure that GRID_BOUNDS is formatted correctly? \n'
               '         (minLong, maxLong, minLat, maxLat, e.g. "(120, 125, -6, 3)")', file=sys.stderr)
@@ -116,8 +126,8 @@ print("Wombling grid bounds: \n"
       file=sys.stderr)
 
 # Create grid for interpolation
-longs = np.arange(grid_bounds[0], grid_bounds[1], 1 / args.density[0])
-lats = np.arange(grid_bounds[2], grid_bounds[3], 1 / args.density[1])
+longs = np.arange(grid_bounds[0], grid_bounds[1] + 1/ args.density[0], 1 / args.density[0])
+lats = np.arange(grid_bounds[2], grid_bounds[3] + 1/ args.density[1], 1 / args.density[1])
 grid_lats, grid_longs = np.meshgrid(lats, longs)
 mid_lats, mid_longs = np.meshgrid((lats[1:] + lats[:-1])/2, (longs[1:] + longs[:-1])/2)
 
@@ -253,12 +263,14 @@ if not args.no_plot:
             grid_labeled[grid_labeled == label_] = 0
 
     m = Basemap(projection='cyl',
-                llcrnrlat=np.min(grid_lats),
-                urcrnrlat=np.max(grid_lats),
-                llcrnrlon=np.min(grid_longs),
-                urcrnrlon=np.max(grid_longs),
+                llcrnrlat=grid_bounds[2],
+                urcrnrlat=grid_bounds[3],
+                llcrnrlon=grid_bounds[0],
+                urcrnrlon=grid_bounds[1],
                 resolution='i')
-    m.drawcoastlines(linewidth=0.5)
+    # m.drawcoastlines(linewidth=0.5)
+    m.drawmapboundary(fill_color='#bfffff', zorder=0)
+    m.fillcontinents(color='#ffffff', lake_color='#bfffff', zorder=1)
 
     plt.tight_layout(pad=0, h_pad=0, w_pad=0)
 
@@ -267,13 +279,13 @@ if not args.no_plot:
     plt.imshow(np.fliplr(rateOfChange).T,
                extent=[longs.min(), longs.max(),
                        lats.min(), lats.max()],
-               cmap="Reds", alpha=args.alpha)
+               cmap="Reds", alpha=args.alpha, zorder=2)
 
     plt.quiver(mid_longs[grid_labeled > 0], mid_lats[grid_labeled > 0],  # Longitude, Latitude
                np.cos(finalWeightedDirectionOfChange[grid_labeled > 0]),
                np.sin(finalWeightedDirectionOfChange[grid_labeled > 0]),
                headwidth=0, headlength=0, color="Black",
-               headaxislength=0, width=0.005, pivot='mid')
+               headaxislength=0, width=0.005, pivot='mid', zorder=3)
 
     if args.no_plot_save:
         plt.show()
